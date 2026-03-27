@@ -16,7 +16,7 @@ from utils import strip_thinking_tokens
 
 logger = logging.getLogger(__name__)
 
-TOOL_CALL_PATTERN = re.compile(
+TOOL_CALL_PATTERN = re.compile( # langchain不需要了
     r"\[TOOL_CALL:(?P<tool>[^:]+):(?P<body>[^\]]+)\]",
     re.IGNORECASE,
 )
@@ -29,7 +29,7 @@ class PlanningService:
         self._config = config
 
     def plan_todo_list(self, state: SummaryState) -> List[TodoItem]:
-        """Ask the planner agent to break the topic into actionable tasks."""
+        """让规划Agent将研究主题拆解为可执行的小任务"""
 
         prompt = todo_planner_instructions.format(
             current_date=get_current_date(),
@@ -81,7 +81,7 @@ class PlanningService:
     # Parsing helpers
     # ------------------------------------------------------------------
     def _extract_tasks(self, raw_response: str) -> List[dict[str, Any]]:
-        """Parse planner output into a list of task dictionaries."""
+        """将规划Agent输出解析为任务字典列表。"""
 
         text = raw_response.strip()
         if self._config.strip_thinking_tokens:
@@ -111,7 +111,7 @@ class PlanningService:
         return tasks
 
     def _extract_json_payload(self, text: str) -> Optional[dict[str, Any] | list]:
-        """Try to locate and parse a JSON object or array from the text."""
+        """尝试从文本中定位并解析 JSON 对象或数组。"""
 
         start = text.find("{")
         end = text.rfind("}")
@@ -134,7 +134,7 @@ class PlanningService:
         return None
 
     def _extract_tool_payload(self, text: str) -> Optional[dict[str, Any]]:
-        """Parse the first TOOL_CALL expression in the output."""
+        """解析输出中的第一个 TOOL_CALL 表达式。"""
 
         match = TOOL_CALL_PATTERN.search(text)
         if not match:
