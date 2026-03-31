@@ -1,4 +1,4 @@
-"""协调深度研究工作流的编排器"""
+"""Orchestrator coordinating the deep research workflow."""
 
 from __future__ import annotations
 
@@ -8,17 +8,11 @@ from pathlib import Path
 from queue import Empty, Queue
 from threading import Lock, Thread
 from typing import Any, Callable, Iterator
-
-from hello_agents import HelloAgentsLLM, ToolAwareSimpleAgent
-from hello_agents.tools import ToolRegistry
-from hello_agents.tools.builtin.note_tool import NoteTool
-
 from langchain.agents import create_agent
-from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI
-from langchain_community.chat_models import ChatOllama
-from langchain_core.language_models import BaseChatModel
 
+# from hello_agents import HelloAgentsLLM, ToolAwareSimpleAgent
+# from hello_agents.tools import ToolRegistry
+# from hello_agents.tools.builtin.note_tool import NoteTool
 
 from config import Configuration
 from prompts import (
@@ -32,6 +26,7 @@ from services.reporter import ReportingService
 from services.search import dispatch_search, prepare_research_context
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -40,19 +35,21 @@ class DeepResearchAgent:
     """Coordinator orchestrating TODO-based research workflow using HelloAgents."""
 
     def __init__(self, config: Configuration | None = None) -> None:
+        """Initialise the coordinator with configuration and shared tools."""
         self.config = config or Configuration.from_env()
         self.llm = self._init_llm()
-
-        self.note_tool = (
-            NoteTool(workspace=self.config.notes_workspace)
-            if self.config.enable_notes
-            else None
-        )
-        self.tools_registry: ToolRegistry | None = None
-        if self.note_tool:
-            registry = ToolRegistry()
-            registry.register_tool(self.note_tool)
-            self.tools_registry = registry
+        self.note_tool = None
+        
+        # self.note_tool = (
+        #     # NoteTool(workspace=self.config.notes_workspace)
+        #     if self.config.enable_notes
+        #     else None
+        # )
+        # self.tools_registry: ToolRegistry | None = None
+        # if self.note_tool:
+        #     registry = ToolRegistry()
+        #     registry.register_tool(self.note_tool)
+        #     self.tools_registry = registry
 
         self._tool_tracker = ToolCallTracker(
             self.config.notes_workspace if self.config.enable_notes else None
@@ -61,16 +58,13 @@ class DeepResearchAgent:
         self._state_lock = Lock()
 
         self.todo_agent = self._create_tool_aware_agent(
-            name="研究规划专家",
             system_prompt=todo_planner_system_prompt.strip(),
         )
         self.report_agent = self._create_tool_aware_agent(
-            name="报告撰写专家",
             system_prompt=report_writer_instructions.strip(),
         )
 
-        self._summarizer_factory: Callable[[], ToolAwareSimpleAgent] = lambda: self._create_tool_aware_agent(  # noqa: E501
-            name="任务总结专家",
+        self._summarizer_factory: Callable[[], Any] = lambda: self._create_tool_aware_agent(  # noqa: E501
             system_prompt=task_summarizer_instructions.strip(),
         )
 
@@ -83,54 +77,55 @@ class DeepResearchAgent:
     # Public API
     # ------------------------------------------------------------------
     def _init_llm(self) -> BaseChatModel:
-        """根据配置初始化 LLM"""
-        llm_kwargs: dict[str, Any] = {"temperature": 0.0}
+            """根据配置初始化 LLM"""
+            llm_kwargs: dict[str, Any] = {"temperature": 0.0}
 
-        model_id = self.config.llm_model_id or self.config.local_llm
-        if model_id:
-            llm_kwargs["model"] = model_id
+            model_id = self.config.llm_model_id or self.config.local_llm
+            if model_id:
+                llm_kwargs["model"] = model_id
 
-        provider = (self.config.llm_provider or "").strip()
-        # if provider:
-        #     llm_kwargs["provider"] = provider   
+            provider = (self.config.llm_provider or "").strip()
+            # if provider:
+            #     llm_kwargs["provider"] = provider   
 
-        if provider == "ollama":
-            from langchain_community.chat_models import ChatOllama
-            llm_kwargs["base_url"] = self.config.sanitized_ollama_url()
-            if self.config.llm_api_key:
-                llm_kwargs["api_key"] = self.config.llm_api_key
+            if provider == "ollama":
+                from langchain_community.chat_models import ChatOllama
+                llm_kwargs["base_url"] = self.config.sanitized_ollama_url()
+                if self.config.llm_api_key:
+                    llm_kwargs["api_key"] = self.config.llm_api_key
+                else:
+                    llm_kwargs["api_key"] = "ollama"
+                return ChatOllama(**llm_kwargs)
+
+            elif provider == "lmstudio":
+                from langchain_openai import ChatOpenAI
+                llm_kwargs["base_url"] = self.config.lmstudio_base_url
+                if self.config.llm_api_key:
+                    llm_kwargs["api_key"] = self.config.llm_api_key
+                # LM Studio 不需要真实 key，但可以传一个占位符
+                else:
+                    llm_kwargs["api_key"] = "not-needed"
+                return ChatOpenAI(**llm_kwargs)
+
             else:
-                llm_kwargs["api_key"] = "ollama"
-            return ChatOllama(**llm_kwargs)
+                from langchain_openai import ChatOpenAI
+                if self.config.llm_base_url:
+                    llm_kwargs["base_url"] = self.config.llm_base_url
+                if self.config.llm_api_key:
+                    llm_kwargs["api_key"] = self.config.llm_api_key
+                return ChatOpenAI(**llm_kwargs)
 
-        elif provider == "lmstudio":
-            from langchain_openai import ChatOpenAI
-            llm_kwargs["base_url"] = self.config.lmstudio_base_url
-            if self.config.llm_api_key:
-                llm_kwargs["api_key"] = self.config.llm_api_key
-            # LM Studio 不需要真实 key，但可以传一个占位符
-            else:
-                llm_kwargs["api_key"] = "not-needed"
-            return ChatOpenAI(**llm_kwargs)
+    # def _create_tool_aware_agent(self, *, name: str, system_prompt: str) -> ToolAwareSimpleAgent:
+    #     """Instantiate a ToolAwareSimpleAgent sharing tool registry and tracker."""
+    #     return ToolAwareSimpleAgent(
+    #         llm=self.llm,
+    #         system_prompt=system_prompt,
+    #         enable_tool_calling=self.tools_registry is not None,
+    #         tool_registry=self.tools_registry,
+    #         tool_call_listener=self._tool_tracker.record,
+    #     )
 
-        else:
-            from langchain_openai import ChatOpenAI
-            if self.config.llm_base_url:
-                llm_kwargs["base_url"] = self.config.llm_base_url
-            if self.config.llm_api_key:
-                llm_kwargs["api_key"] = self.config.llm_api_key
-            return ChatOpenAI(**llm_kwargs)
-
-    def _create_tool_aware_agent(self, *, name: str, system_prompt: str) -> ToolAwareSimpleAgent:
-        """实例化一个共享工具注册表和跟踪器的 ToolAwareSimpleAgent。"""
-        # return ToolAwareSimpleAgent(
-        #     name=name,
-        #     llm=self.llm,
-        #     system_prompt=system_prompt,
-        #     enable_tool_calling=self.tools_registry is not None,
-        #     tool_registry=self.tools_registry,
-        #     tool_call_listener=self._tool_tracker.record,
-        # )
+    def _create_tool_aware_agent(self, *,  system_prompt: str):
         return create_agent(
             model=self.llm,
             tools=[],
@@ -138,7 +133,7 @@ class DeepResearchAgent:
         )
 
     def _set_tool_event_sink(self, sink: Callable[[dict[str, Any]], None] | None) -> None:
-        """Enable or disable immediate tool event callbacks."""
+        """主要用于控制工具事件的实时推送"""
         self._tool_event_sink_enabled = sink is not None
         self._tool_tracker.set_event_sink(sink)
 
@@ -146,14 +141,23 @@ class DeepResearchAgent:
         """Execute the research workflow and return the final report."""
         state = SummaryState(research_topic=topic)
         state.todo_items = self.planner.plan_todo_list(state)
+        print(f"[DEBUG]规划后任务数量: {len(state.todo_items)}")
+        print(f"[DEBUG] todo_items 内容: {[t.title for t in state.todo_items]}")  # 新增
         self._drain_tool_events(state)
 
         if not state.todo_items:
             logger.info("No TODO items generated; falling back to single task")
             state.todo_items = [self.planner.create_fallback_task(state)]
+            print("[DEBUG] 使用后备任务")
 
+        print("[DEBUG] 开始任务循环")   # 新增
+        print(f"[DEBUG] self._execute_task = {self._execute_task}")
         for task in state.todo_items:
-            self._execute_task(state, task, emit_stream=False)
+            print(f"[DEBUG] 准备执行任务: {task.title}")
+            print(f"[DEBUG] 调用 _execute_task 前: {self._execute_task}")
+            for _ in self._execute_task(state, task, emit_stream=False):
+                pass
+            print(f"[DEBUG] 任务执行完毕，状态: {task.status}")   # 新增
 
         report = self.reporting.generate_report(state)
         self._drain_tool_events(state)
@@ -315,13 +319,15 @@ class DeepResearchAgent:
         step: int | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Run search + summarization for a single task."""
+        print("!!! 进入 _execute_task !!!")
         task.status = "in_progress"
-
+        print(f"[_execute_task] 调用 dispatch_search, 查询: {task.query}")
         search_result, notices, answer_text, backend = dispatch_search(
             task.query,
             self.config,
             state.research_loop_count,
         )
+        logger.info(f"Search result: {search_result is not None}, notices: {notices}")
         self._last_search_notices = notices
         task.notices = notices
 

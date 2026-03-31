@@ -110,27 +110,51 @@ class PlanningService:
 
         return tasks
 
-    def _extract_json_payload(self, text: str) -> Optional[dict[str, Any] | list]:
-        """Try to locate and parse a JSON object or array from the text."""
+    # def _extract_json_payload(self, text: str) -> Optional[dict[str, Any] | list]:
+    #     """Try to locate and parse a JSON object or array from the text."""
 
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            candidate = text[start : end + 1]
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                pass
+    #     start = text.find("{")
+    #     end = text.rfind("}")
+    #     if start != -1 and end != -1 and end > start:
+    #         candidate = text[start : end + 1]
+    #         try:
+    #             return json.loads(candidate)
+    #         except json.JSONDecodeError:
+    #             pass
 
-        start = text.find("[")
-        end = text.rfind("]")
-        if start != -1 and end != -1 and end > start:
-            candidate = text[start : end + 1]
-            try:
-                return json.loads(candidate)
-            except json.JSONDecodeError:
-                return None
+    #     start = text.find("[")
+    #     end = text.rfind("]")
+    #     if start != -1 and end != -1 and end > start:
+    #         candidate = text[start : end + 1]
+    #         try:
+    #             return json.loads(candidate)
+    #         except json.JSONDecodeError:
+    #             return None
 
+    #     return None
+    import json
+    from typing import Optional, Union, Any
+
+    def _extract_json_payload(self, text: str) -> Optional[Union[dict, list]]:
+        """从文本中提取第一个 JSON 对象或数组"""
+        decoder = json.JSONDecoder()
+        idx = 0
+        while idx < len(text):
+            # 跳过空白
+            while idx < len(text) and text[idx] in ' \t\n\r':
+                idx += 1
+            if idx >= len(text):
+                break
+            # 检查是否是 JSON 开始字符
+            if text[idx] in '{[':
+                try:
+                    obj, end = decoder.raw_decode(text[idx:])
+                    return obj
+                except json.JSONDecodeError:
+                    # 解析失败，继续下一个字符
+                    idx += 1
+            else:
+                idx += 1
         return None
 
     def _extract_tool_payload(self, text: str) -> Optional[dict[str, Any]]:

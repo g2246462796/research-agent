@@ -56,6 +56,7 @@ def dispatch_search(
 ) -> Tuple[Optional[Dict[str, Any]], List[str], Optional[str], str]:
     """使用 LangChain 搜索工具执行搜索，并标准化返回格式。"""
     search_api = get_config_value(config.search_api)
+    logger.info(f"Search query: {query}, backend: {search_api}")
 
     try:
         tool = _get_search_tool(search_api, config.fetch_full_page)

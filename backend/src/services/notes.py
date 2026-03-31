@@ -6,7 +6,7 @@
 是否可视为黑盒子：是的。如果不需要修改或定制笔记交互逻辑，可以直接将它当作一个输入 TodoItem、输出指引字符串的工具函数，无需关心内部 JSON 构造细节。
 它只依赖 models.TodoItem，不涉及外部状态或复杂依赖，适合作为独立模块使用。
 """
-from __future__ import annotations
+# from __future__ import annotations
 
 import json
 
