@@ -117,9 +117,21 @@ class PlanningService:
 
     def _extract_json_payload(self, text: str) -> Optional[dict[str, Any] | list]:
         import re
-        # 移除所有 [TOOL_CALL:note:...] 块
+        import json
+
+        # 1. 优先提取 ```json ... ``` 代码块中的内容
+        code_block = re.search(r'```json\n(.*?)\n```', text, re.DOTALL)
+        if code_block:
+            json_str = code_block.group(1).strip()
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                pass
+
+        # 2. 如果没有代码块，移除所有 [TOOL_CALL:note:...] 块
         cleaned = re.sub(r'\[TOOL_CALL:note:[^\]]+\]', '', text)
-        # 然后按原来的方式提取第一个 JSON
+
+        # 3. 尝试提取第一个 JSON 对象或数组
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start != -1 and end != -1 and end > start:

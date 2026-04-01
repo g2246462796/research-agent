@@ -75,7 +75,7 @@ class SummarizationService:
             nonlocal raw_buffer, visible_output, emit_index
             try:
                 for chunk in chain.stream({"messages": [("user", prompt)]}):
-                    print(f"chunk type: {type(chunk)}, content: {chunk[:100] if isinstance(chunk, str) else chunk}")
+                    # print(f"chunk type: {type(chunk)}, content: {chunk[:100] if isinstance(chunk, str) else chunk}")
                     # chunk 已经是纯文本字符串
                     # 1. 兼容 StrOutputParser 已经生效的情况
                     if isinstance(chunk, str):
