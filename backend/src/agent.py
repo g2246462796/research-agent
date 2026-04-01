@@ -64,7 +64,7 @@ class DeepResearchAgent:
             system_prompt=report_writer_instructions.strip(),
         )
 
-        self._summarizer_factory: Callable[[], Any] = lambda: self._create_tool_aware_agent(  # noqa: E501
+        self._summarizer_factory: Callable[[], Any] = lambda: self._create_text_agent(  # noqa: E501
             system_prompt=task_summarizer_instructions.strip(),
         )
 
@@ -131,6 +131,50 @@ class DeepResearchAgent:
             tools=[],
             system_prompt=system_prompt,
         )
+    def _create_text_agent(self, system_prompt: str):
+        from langchain.agents import create_agent
+        from langchain_core.output_parsers import StrOutputParser
+        from langchain_core.runnables import RunnableLambda
+
+        agent = create_agent(
+            model=self.llm,
+            tools=[],
+            system_prompt=system_prompt,
+        )
+
+        # 健壮的文本提取函数
+        def extract_text(chunk):
+            # 如果已经是字符串，直接返回
+            if isinstance(chunk, str):
+                return chunk
+            # 如果是字典，尝试提取 messages[-1].content
+            if isinstance(chunk, dict):
+                # 可能直接有 messages 键
+                if "messages" in chunk and chunk["messages"]:
+                    last_msg = chunk["messages"][-1]
+                    if hasattr(last_msg, "content"):
+                        return last_msg.content
+                    elif isinstance(last_msg, dict):
+                        return last_msg.get("content", "")
+                # 可能嵌套在 model 下（如 {'model': {'messages': [...]}}）
+                if "model" in chunk and isinstance(chunk["model"], dict):
+                    model = chunk["model"]
+                    if "messages" in model and model["messages"]:
+                        last_msg = model["messages"][-1]
+                        if hasattr(last_msg, "content"):
+                            return last_msg.content
+                        elif isinstance(last_msg, dict):
+                            return last_msg.get("content", "")
+            # 如果 chunk 有 content 属性（如 AIMessageChunk）
+            if hasattr(chunk, "content"):
+                return chunk.content
+            # 最终兜底
+            return str(chunk)
+
+        extract_content = RunnableLambda(extract_text)
+
+        # 组合链：agent → 提取文本 → StrOutputParser
+        return agent | extract_content | StrOutputParser()
 
     def _set_tool_event_sink(self, sink: Callable[[dict[str, Any]], None] | None) -> None:
         """主要用于控制工具事件的实时推送"""

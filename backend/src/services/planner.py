@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, List, Optional
+from typing import Any, List, Optional,Dict
 
 
 from models import SummaryState, TodoItem
@@ -38,7 +38,11 @@ class PlanningService:
         response = self._agent.invoke({"messages": [("user", prompt)]})
         # response = self._agent.invoke(prompt)
         # self._agent.clear_history()   # langchain默认不自动保存历史
+        
         output = response["messages"][-1].content
+        print("=== Planner raw output ===")
+        print(output)
+        print("=== End of raw output ===")
         logger.info("Planner raw output (truncated): %s", output[:500])
 
         tasks_payload = self._extract_tasks(output)
@@ -80,81 +84,60 @@ class PlanningService:
     # ------------------------------------------------------------------
     # Parsing helpers
     # ------------------------------------------------------------------
+
     def _extract_tasks(self, raw_response: str) -> List[dict[str, Any]]:
-        """Parse planner output into a list of task dictionaries."""
+            """Parse planner output into a list of task dictionaries."""
 
-        text = raw_response.strip()
-        if self._config.strip_thinking_tokens:
-            text = strip_thinking_tokens(text)
+            text = raw_response.strip()
+            if self._config.strip_thinking_tokens:
+                text = strip_thinking_tokens(text)
 
-        json_payload = self._extract_json_payload(text)
-        tasks: List[dict[str, Any]] = []
+            json_payload = self._extract_json_payload(text)
+            tasks: List[dict[str, Any]] = []
 
-        if isinstance(json_payload, dict):
-            candidate = json_payload.get("tasks")
-            if isinstance(candidate, list):
-                for item in candidate:
-                    if isinstance(item, dict):
-                        tasks.append(item)
-        elif isinstance(json_payload, list):
-            for item in json_payload:
-                if isinstance(item, dict):
-                    tasks.append(item)
-
-        if not tasks:
-            tool_payload = self._extract_tool_payload(text)
-            if tool_payload and isinstance(tool_payload.get("tasks"), list):
-                for item in tool_payload["tasks"]:
+            if isinstance(json_payload, dict):
+                candidate = json_payload.get("tasks")
+                if isinstance(candidate, list):
+                    for item in candidate:
+                        if isinstance(item, dict):
+                            tasks.append(item)
+            elif isinstance(json_payload, list):
+                for item in json_payload:
                     if isinstance(item, dict):
                         tasks.append(item)
 
-        return tasks
+            if not tasks:
+                tool_payload = self._extract_tool_payload(text)
+                if tool_payload and isinstance(tool_payload.get("tasks"), list):
+                    for item in tool_payload["tasks"]:
+                        if isinstance(item, dict):
+                            tasks.append(item)
 
-    # def _extract_json_payload(self, text: str) -> Optional[dict[str, Any] | list]:
-    #     """Try to locate and parse a JSON object or array from the text."""
+            return tasks
 
-    #     start = text.find("{")
-    #     end = text.rfind("}")
-    #     if start != -1 and end != -1 and end > start:
-    #         candidate = text[start : end + 1]
-    #         try:
-    #             return json.loads(candidate)
-    #         except json.JSONDecodeError:
-    #             pass
+    def _extract_json_payload(self, text: str) -> Optional[dict[str, Any] | list]:
+        import re
+        # 移除所有 [TOOL_CALL:note:...] 块
+        cleaned = re.sub(r'\[TOOL_CALL:note:[^\]]+\]', '', text)
+        # 然后按原来的方式提取第一个 JSON
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            candidate = cleaned[start:end+1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
 
-    #     start = text.find("[")
-    #     end = text.rfind("]")
-    #     if start != -1 and end != -1 and end > start:
-    #         candidate = text[start : end + 1]
-    #         try:
-    #             return json.loads(candidate)
-    #         except json.JSONDecodeError:
-    #             return None
+        start = cleaned.find("[")
+        end = cleaned.rfind("]")
+        if start != -1 and end != -1 and end > start:
+            candidate = cleaned[start:end+1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                return None
 
-    #     return None
-    import json
-    from typing import Optional, Union, Any
-
-    def _extract_json_payload(self, text: str) -> Optional[Union[dict, list]]:
-        """从文本中提取第一个 JSON 对象或数组"""
-        decoder = json.JSONDecoder()
-        idx = 0
-        while idx < len(text):
-            # 跳过空白
-            while idx < len(text) and text[idx] in ' \t\n\r':
-                idx += 1
-            if idx >= len(text):
-                break
-            # 检查是否是 JSON 开始字符
-            if text[idx] in '{[':
-                try:
-                    obj, end = decoder.raw_decode(text[idx:])
-                    return obj
-                except json.JSONDecodeError:
-                    # 解析失败，继续下一个字符
-                    idx += 1
-            else:
-                idx += 1
         return None
 
     def _extract_tool_payload(self, text: str) -> Optional[dict[str, Any]]:

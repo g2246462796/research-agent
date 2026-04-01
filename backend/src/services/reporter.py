@@ -58,8 +58,9 @@ class ReportingService:
             f"研究主题：{state.research_topic}\n"
             f"任务概览：\n{''.join(tasks_block)}\n"
             f"可用任务笔记：\n{notes_section}\n"
-            f"请针对每条任务笔记使用格式：[TOOL_CALL:note:{read_template}] 读取内容，整合所有信息后撰写报告。\n"
-            f"如需输出汇总结论，可追加调用：[TOOL_CALL:note:{create_conclusion_template}] 保存报告要点。"
+            "请直接撰写一份完整的 Markdown 研究报告，包含背景、核心洞见、证据与数据、风险与挑战、参考来源等部分。\n"
+            # f"请针对每条任务笔记使用格式：[TOOL_CALL:note:{read_template}] 读取内容，整合所有信息后撰写报告。\n"
+            # f"如需输出汇总结论，可追加调用：[TOOL_CALL:note:{create_conclusion_template}] 保存报告要点。"
         )
 
 
@@ -72,4 +73,3 @@ class ReportingService:
         report_text = strip_tool_calls(report_text).strip()
 
         return report_text or "报告生成失败，请检查输入。"
-

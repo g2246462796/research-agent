@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
-from typing import Tuple,Any
-
+from typing import Any, Tuple
 
 from models import SummaryState, TodoItem
 from config import Configuration
 from utils import strip_thinking_tokens
-from services.notes import build_note_guidance
 from services.text_processing import strip_tool_calls
 
 
@@ -24,36 +22,31 @@ class SummarizationService:
         self._agent_factory = summarizer_factory
         self._config = config
 
+    # ------------------------------------------------------------------
+    # 同步摘要
+    # ------------------------------------------------------------------
     def summarize_task(self, state: SummaryState, task: TodoItem, context: str) -> str:
-        """Generate a task-specific summary using the summarizer agent."""
-
         prompt = self._build_prompt(state, task, context)
-
-        agent = self._agent_factory()
-
-        # 使用 invoke 替代 run
-        response = agent.invoke({"messages": [("user", prompt)]})
-        output = response["messages"][-1].content
-
+        chain = self._agent_factory()  # 现在返回的是纯文本链
+        output = chain.invoke({"messages": [("user", prompt)]})  # 直接返回纯文本
         summary_text = output.strip()
         if self._config.strip_thinking_tokens:
             summary_text = strip_thinking_tokens(summary_text)
-
         summary_text = strip_tool_calls(summary_text).strip()
-
         return summary_text or "暂无可用信息"
 
+    # ------------------------------------------------------------------
+    # 流式摘要
+    # ------------------------------------------------------------------
     def stream_task_summary(
         self, state: SummaryState, task: TodoItem, context: str
     ) -> Tuple[Iterator[str], Callable[[], str]]:
-        """Stream the summary text for a task while collecting full output."""
-
         prompt = self._build_prompt(state, task, context)
         remove_thinking = self._config.strip_thinking_tokens
         raw_buffer = ""
         visible_output = ""
         emit_index = 0
-        agent = self._agent_factory()
+        chain = self._agent_factory()  # 纯文本链
 
         def flush_visible() -> Iterator[str]:
             nonlocal emit_index, raw_buffer
@@ -81,26 +74,23 @@ class SummarizationService:
         def generator() -> Iterator[str]:
             nonlocal raw_buffer, visible_output, emit_index
             try:
-                # 使用 LangChain 的 stream 方法
-                for chunk in agent.stream({"messages": [("user", prompt)]}):
-                    # 提取文本内容（假设 chunk 包含 messages 列表）
-                    if "messages" in chunk and chunk["messages"]:
+                for chunk in chain.stream({"messages": [("user", prompt)]}):
+                    print(f"chunk type: {type(chunk)}, content: {chunk[:100] if isinstance(chunk, str) else chunk}")
+                    # chunk 已经是纯文本字符串
+                    # 1. 兼容 StrOutputParser 已经生效的情况
+                    if isinstance(chunk, str):
+                        new_content = chunk
+                    # 2. 兼容原始 agent 输出（字典）
+                    elif isinstance(chunk, dict) and "messages" in chunk:
                         last_msg = chunk["messages"][-1]
-                        if hasattr(last_msg, "content"):
-                            new_content = last_msg.content
-                        elif isinstance(last_msg, dict):
-                            new_content = last_msg.get("content", "")
-                        else:
-                            new_content = str(last_msg)
+                        new_content = last_msg.content if hasattr(last_msg, "content") else str(last_msg)
                     else:
                         new_content = str(chunk)
-
-                    # 处理累积内容（通常 LangChain 的流式是累积的）
+                    # 计算增量（因为流式通常是累积的）
                     if len(new_content) > len(raw_buffer):
                         delta = new_content[len(raw_buffer):]
                         raw_buffer = new_content
                     else:
-                        # 可能是增量，直接追加
                         delta = new_content
                         raw_buffer += new_content
 
@@ -125,20 +115,20 @@ class SummarizationService:
                 cleaned = strip_thinking_tokens(visible_output)
             else:
                 cleaned = visible_output
-
             return strip_tool_calls(cleaned).strip()
 
         return generator(), get_summary
 
+    # ------------------------------------------------------------------
+    # 提示构建
+    # ------------------------------------------------------------------
     def _build_prompt(self, state: SummaryState, task: TodoItem, context: str) -> str:
-        """Construct the summarization prompt shared by both modes."""
-
         return (
             f"任务主题：{state.research_topic}\n"
             f"任务名称：{task.title}\n"
             f"任务目标：{task.intent}\n"
             f"检索查询：{task.query}\n"
             f"任务上下文：\n{context}\n"
-            f"{build_note_guidance(task)}\n"
-            "请按照以上协作要求先同步笔记，然后返回一份面向用户的 Markdown 总结（仍遵循任务总结模板）。"
+            # f"{build_note_guidance(task)}\n"
+            "返回一份面向用户的 Markdown 总结（仍遵循任务总结模板）。"
         )
